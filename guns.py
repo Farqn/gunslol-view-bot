@@ -4,66 +4,89 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 
-# Proxy listesini çeken fonksiyon
 def get_proxies():
+    """ProxyScrape API'den güncel proxy listesini çeker."""
     print("\n[+] Yeni proxy listesi çekiliyor...")
-    url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
+    # API URL: Sadece HTTP protokolünde ve hızlı yanıt verenleri çeker
+    url = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         if response.status_code == 200:
-            # Proxy'leri bir listeye çeviriyoruz
             proxies = response.text.splitlines()
-            print(f"[!] {len(proxies)} adet proxy alındı.")
+            print(f"[!] {len(proxies)} adet potansiyel proxy alındı.")
             return proxies
     except Exception as e:
-        print(f"Proxy çekilirken hata: {e}")
+        print(f"[X] Proxy listesi alınırken hata oluştu: {e}")
     return []
 
 def view_bot(username, proxy):
+    """Belirtilen proxy ile hedef profili ziyaret eder."""
     target_url = f"https://guns.lol/{username}"
     
     options = webdriver.ChromeOptions()
-    options.add_argument(f'--proxy-server={proxy}')
-    # options.add_argument("--headless") # Ekranın açılmasını istemiyorsan bunu aç
     
-    # Hızlı çalışması için görselleri yüklememe ayarı (opsiyonel)
-    options.add_argument('--blink-settings=imagesEnabled=false')
+    # Proxy formatını standartlaştırıyoruz (bazı proxylerde http:// eksik olabilir)
+    if not proxy.startswith("http"):
+        proxy_address = f"http://{proxy}"
+    else:
+        proxy_address = proxy
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    # Sayfa yüklenme süresini sınırla (Proxy yavaşsa takılmasın)
-    driver.set_page_load_timeout(20) 
+    options.add_argument(f'--proxy-server={proxy_address}')
+    
+    # --- Stabilite ve Hız Ayarları ---
+    options.add_argument("--headless=new") # Arka planda çalışır (pencere açılmaz)
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--log-level=3") # Terminal kirliliğini engeller
+    options.add_argument('--blink-settings=imagesEnabled=false') # Resimleri yüklemez (tasarruf)
 
+    driver = None
     try:
-        print(f"[*] Proxy kullanılıyor: {proxy}")
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver.set_page_load_timeout(15) # Yavaş proxylerde sonsuza kadar beklemez
+        
+        print(f"[*] Deneniyor: {proxy}")
         driver.get(target_url)
-        time.sleep(5) # İzlenmenin sayılması için bekleme
+        
+        # Sayfanın yüklenmesi ve izlenmenin sayılması için bekleme süresi
+        time.sleep(8) 
+        
         print(f"[✓] {username} başarıyla ziyaret edildi.")
-    except Exception as e:
-        print(f"[X] Bağlantı başarısız (Proxy çalışmıyor olabilir): {proxy}")
+    except Exception:
+        # Ücretsiz proxylerin çoğu çalışmayacağı için hata detayını gizliyoruz
+        print(f"[X] Başarısız: {proxy}")
     finally:
-        driver.quit()
+        if driver:
+            driver.quit()
 
 if __name__ == "__main__":
-    print("=== Guns.lol Gelişmiş İzlenme Botu ===")
-    kullanici_adi = input("Hedef kullanıcı adı: ")
+    print("========================================")
+    print("   GUNS.LOL ADVANCED VIEW BOT v1.0")
+    print("========================================")
     
-    while True:
-        proxy_listesi = get_proxies()
-        
-        if not proxy_listesi:
-            print("Proxy listesi alınamadı, 1 dakika sonra tekrar denenecek.")
-            time.sleep(60)
-            continue
-
-        start_time = time.time()
-        
-        # Proxy listesindeki her proxy için döngü
-        for proxy in proxy_listesi:
-            # Eğer 5 dakika (300 saniye) geçtiyse listeyi güncellemek için döngüden çık
-            if time.time() - start_time > 300:
-                print("\n[!] 5 dakika doldu, liste yenileniyor...")
-                break
+    target_user = input("Hedef kullanıcı adını girin: ").strip()
+    
+    if not target_user:
+        print("Geçersiz kullanıcı adı. Program kapatılıyor.")
+    else:
+        while True:
+            proxy_list = get_proxies()
             
-            view_bot(kullanici_adi, proxy)
-            # Siteyi koruma mekanizmalarına takılmamak için kısa bir ara
-            time.sleep(2)
+            if not proxy_list:
+                print("Liste boş, 30 saniye sonra tekrar denenecek...")
+                time.sleep(30)
+                continue
+
+            start_time = time.time()
+            
+            for p in proxy_list:
+                # 5 dakika (300 saniye) dolduysa yeni liste çekmek için döngüyü kır
+                if time.time() - start_time > 300:
+                    print("\n[!] 5 dakika doldu. Liste tazeleniyor...")
+                    break
+                
+                view_bot(target_user, p)
+                
+                # Sistem yorulmasın ve site tarafından engellenme riskini azaltmak için
+                time.sleep(1)
